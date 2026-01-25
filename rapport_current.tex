@@ -1,0 +1,137 @@
+\documentclass[a4paper,11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs} % Pour les jolis tableaux
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{titlesec}
+\usepackage{caption}
+\usepackage{xcolor}
+
+% Configuration des marges
+\geometry{hmargin=2.5cm,vmargin=2.5cm}
+
+% Titre et Auteurs
+\title{\textbf{Rapport de Projet : Medical Question Answering}\\
+\large M2 Probabilités et Finance -- Apprentissage Profond}
+\author{\textbf{Étudiants :} \\ Romain GRAS \\ Souleymane DIABATE \\ Faustin MARCHAL-CONRAD}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Ce projet explore différentes stratégies de \textit{Question Answering} (QA) appliquées au domaine médical, en utilisant le dataset \texttt{medical\_flashcards}. L'objectif est de comparer des approches allant du simple \textit{Zero-shot} au \textit{Fine-tuning} (QLoRA), en passant par le \textit{RAG} (Retrieval Augmented Generation). Nous mettons en évidence une dichotomie marquée entre les métriques syntaxiques (ROUGE/BLEU) et la pertinence sémantique évaluée par un juge LLM.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Introduction et Contexte}
+
+La tâche de réponse automatique à des questions médicales présente un défi double : la nécessité d'une exactitude factuelle rigoureuse et l'adaptation à un vocabulaire spécialisé. Dans ce projet, nous utilisons le dataset \texttt{medalpaca/medical\_meadow\_medical\_flashcards} pour évaluer la capacité de modèles de langage (LLM) à répondre à des questions techniques.
+
+Nous avons implémenté et comparé cinq stratégies distinctes sur un sous-ensemble de test, en utilisant un modèle de base (ex: \textit{Zephyr-7b} ou \textit{Mistral}) quantifié en 4-bit pour s'adapter aux contraintes de ressources (Google Colab T4).
+
+\section{Méthodologie}
+
+Nous avons déployé les cinq architectures suivantes :
+
+\begin{enumerate}
+    \item \textbf{Direct (Baseline) :} Le modèle répond à la question brute sans instruction particulière.
+    \item \textbf{Prompt Engineering :} Un \textit{System Prompt} définit le rôle ("You are a medical expert") et contraint la forme de la réponse.
+    \item \textbf{Few-Shot Prompting :} En plus du rôle, nous fournissons 3 exemples complets (Question/Réponse) dans le contexte pour guider le style du modèle.
+    \item \textbf{RAG (Retrieval Augmented Generation) :} Une base de connaissances est construite à partir du set d'entraînement via FAISS et des embeddings (\texttt{all-MiniLM-L6-v2}). Le contexte pertinent est injecté dans le prompt.
+    \item \textbf{Fine-tuning (QLoRA) :} Nous avons entraîné des adaptateurs LoRA sur le modèle quantifié (4-bit) pendant 50 étapes pour spécialiser le modèle sur le dataset.
+\end{enumerate}
+
+\section{Protocole d'Évaluation}
+
+L'évaluation repose sur deux axes complémentaires :
+\begin{itemize}
+    \item \textbf{Métriques Syntaxiques (Forme) :} ROUGE-1, ROUGE-2, ROUGE-L et BLEU mesurent le chevauchement lexical entre la prédiction et la référence ("Gold Answer").
+    \item \textbf{Métrique Sémantique (Fond) :} Une approche \textit{LLM-as-a-Judge} où le modèle note la pertinence de la réponse de 1 à 5.
+\end{itemize}
+
+\section{Analyse des Résultats}
+
+Les résultats quantitatifs sont résumés dans le Tableau \ref{tab:results}.
+
+\begin{table}[H]
+    \centering
+    \caption{Comparaison des performances des 5 stratégies (Moyennes sur le set de test)}
+    \label{tab:results}
+    \resizebox{\textwidth}{!}{%
+    \begin{tabular}{@{}lccccc@{}}
+        \toprule
+        \textbf{Stratégie} & \textbf{ROUGE-1} & \textbf{ROUGE-2} & \textbf{ROUGE-L} & \textbf{BLEU} & \textbf{Judge (1-5)} \\ \midrule
+        Direct & 0.348 & 0.240 & 0.296 & 0.118 & 2.20 \\
+        Prompt & 0.378 & 0.265 & 0.324 & 0.150 & 2.40 \\
+        FewShotPrompt & 0.162 & 0.080 & 0.136 & 0.052 & 2.30 \\
+        RAG & 0.275 & 0.149 & 0.234 & 0.052 & \textbf{2.45} \\
+        Fine-tuned & \textbf{0.411} & \textbf{0.300} & \textbf{0.354} & \textbf{0.166} & 1.20 \\ \bottomrule
+    \end{tabular}%
+    }
+\end{table}
+
+\subsection{Analyse Comparative}
+
+Ces résultats mettent en lumière plusieurs phénomènes intéressants :
+
+\paragraph{1. Le Paradoxe du Fine-Tuning (Mimétisme de surface)}
+C'est le résultat le plus frappant. La stratégie \textit{Fine-tuned} obtient les meilleurs scores syntaxiques (ROUGE-1 : 0.411, BLEU : 0.166), surpassant toutes les autres méthodes. Cela indique que le modèle a parfaitement appris le \textit{style} du dataset (vocabulaire, longueur, structure). 
+Cependant, son score de juge s'effondre à \textbf{1.20/5}, le plus bas du tableau. Cela suggère un phénomène de "Catastrophic Forgetting" ou d'hallucination sévère : le modèle produit des phrases qui \textit{ressemblent} à de la médecine, mais qui sont factuellement fausses ou incohérentes.
+
+\paragraph{2. La Robustesse du RAG (Fond vs Forme)}
+À l'inverse, le RAG obtient des scores syntaxiques faibles (ROUGE-L : 0.234), car il formule ses réponses en se basant sur le contexte récupéré et non en récitant par cœur la réponse de référence.
+Pourtant, il obtient le meilleur score de pertinence (\textbf{2.45/5}). L'apport de contexte externe permet au modèle de répondre juste sur le fond, même si la forme diffère de la référence.
+
+\paragraph{3. L'échec du Few-Shot Prompting}
+L'ajout d'exemples (Few-Shot) a dégradé les performances syntaxiques (ROUGE-1 chute à 0.162) par rapport au Prompt simple. Les exemples fournis ont probablement "sur-contraint" le modèle dans un format trop rigide ou complexe, l'empêchant de générer des réponses simples. Le score juge reste correct (2.30), prouvant que le sens est préservé, mais la formulation est devenue trop divergente de la référence.
+
+\paragraph{4. L'efficacité du Prompt Engineering}
+Le simple ajout d'un rôle ("You are a medical expert") améliore toutes les métriques par rapport à la méthode Directe (+0.2 point de Juge). C'est le meilleur compromis coût/performance.
+
+\section{Analyse Qualitative}
+
+Pour mieux comprendre ces métriques, nous observons ci-dessous des exemples concrets de générations.
+
+% --- TABLEAU D'EXEMPLES À REMPLIR ---
+\begin{table}[H]
+    \centering
+    \caption{Exemple 1 : Question Factuelle}
+    \begin{tabular}{|p{0.2\textwidth}|p{0.75\textwidth}|}
+    \hline
+    \textbf{Question} & [Insérer ici une question du test set] \\ \hline
+    \textbf{Gold Answer} & [Insérer ici la vraie réponse] \\ \hline
+    \hline
+    \textit{Direct} & [Réponse du modèle Direct] \\ \hline
+    \textit{RAG} & [Réponse du modèle RAG - Noter si le contexte a aidé] \\ \hline
+    \textit{Fine-tuned} & [Réponse du modèle Fine-tuned - Observer l'hallucination ou le style] \\ \hline
+    \end{tabular}
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \caption{Exemple 2 : Question Complexe / Diagnostique}
+    \begin{tabular}{|p{0.2\textwidth}|p{0.75\textwidth}|}
+    \hline
+    \textbf{Question} & [Insérer ici une autre question] \\ \hline
+    \textbf{Gold Answer} & [Insérer ici la vraie réponse] \\ \hline
+    \hline
+    \textit{FewShot} & [Réponse FewShot - Observer la structure] \\ \hline
+    \textit{RAG} & [Réponse RAG] \\ \hline
+    \textit{Commentaire} & [Ton analyse : le modèle a-t-il inventé ? A-t-il été trop verbeux ?] \\ \hline
+    \end{tabular}
+\end{table}
+
+\section{Transition vers l'Approfondissement}
+
+L'analyse précédente a montré les limites d'un fine-tuning sommaire et le potentiel du RAG. Cependant, notre implémentation RAG actuelle repose sur des hyperparamètres fixes.
+La seconde partie de ce projet se concentrera sur l'optimisation des mécanismes de récupération (Retrieval) et l'étude des compromis biais-variance dans les stratégies d'embedding.
+
+\end{document}
